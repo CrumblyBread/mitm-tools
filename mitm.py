@@ -1,13 +1,12 @@
 import click
 import time
 from scapy.all import *
-from scapy.all import IPv6,ICMPv6ND_NA,ICMPv6ND_RA,ICMPv6ND_NS,ICMPv6ND_Redirect,ICMPv6NDOptSrcLLAddr,UDP,DHCP6_Advertise,DHCPv6_am,Ether,ICMPv6NDOptRDNSS
+from scapy.all import IPv6,ICMPv6ND_NA,ICMPv6ND_RA,ICMPv6ND_NS,ICMPv6ND_Redirect,ICMPv6NDOptSrcLLAddr,UDP,DHCP6_Advertise,DHCPv6_am,Ether,ICMPv6NDOptRDNSS,DNS_am
 import os
 import subprocess
 import threading
 import regex
 import dhcpAM
-import dnsAM
 import ipaddress
 import socket
 
@@ -218,7 +217,7 @@ def gateway(target,targetsfile,gateway,interface):
 
 @click.command()
 @click.option("-i","--interface", prompt="Ineterface for the network", help="Interface you want to connect to")
-@click.option("-T","--TargetsFile", help="Absolite filepath to list of targets to give addresses")
+@click.option("-T","--TargetsFile", help="Absolute filepath to list of targets to give addresses")
 @click.option("-fA", "--firstAddress", help="First avalible address",default="2001:db9::1")
 @click.option("-lA", "--lastAddress", help="Last avalible address",default="2001:db9::ffff:ffff:ffff:ffff")
 @click.option("-dns", help="Address of DNS server",default="2001:500::1035")
@@ -238,8 +237,8 @@ def dhcp(interface,targetsfile,firstaddress,lastaddress,dns):
 
 @click.command
 @click.option("-i","--interface", prompt="Ineterface for the network", help="Interface you want to connect to")
-@click.option("-T","--TargetsFile", prompt="Absolite filepath to the list of targets", help="Absolite filepath to list of targets to provide dns")
-@click.option("-dns","--DnsFile", prompt="Absolite filepath to dns file", help="Absolite filepath to a dns translation file")
+@click.option("-T","--TargetsFile", prompt="Absolute filepath to the list of targets", help="Absolute filepath to list of targets to provide dns")
+@click.option("-dns","--DnsFile", prompt="Absolute filepath to dns file", help="Absolute filepath to a dns translation file")
 @click.option("-joker", is_flag=True, help="Redirect all queries to the first address in DNS File")
 def dns(interface,targetsfile,dnsfile,joker):
     conf.iface = interface
