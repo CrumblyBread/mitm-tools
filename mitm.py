@@ -8,7 +8,6 @@ import threading
 import regex
 import dhcpAM
 import ipaddress
-import socket
 
 
 class Device:
@@ -78,7 +77,6 @@ def matchIPv6(addr):
         return True
     except:
         return False
-        print(f"{addr} no address")
 
 #def wellcomeMsg():
 #    return("\n___  ________ ________  ___       _____ _____  _____ _     \n|  \/  |_   _|_   _|  \/  |      |_   _|  _  ||  _  | |    \n| .  . | | |   | | | .  . |  ______| | | | | || | | | |    \n| |\/| | | |   | | | |\/| | |______| | | | | || | | | |    \n| |  | |_| |_  | | | |  | |        | | \ \_/ /\ \_/ / |____  by CrumblyBread\n\_|  |_/\___/  \_/ \_|  |_/        \_/  \___/  \___/\_____/\n")
@@ -217,7 +215,7 @@ def gateway(target,targetsfile,gateway,interface):
 
 @click.command()
 @click.option("-i","--interface", prompt="Ineterface for the network", help="Interface you want to connect to")
-@click.option("-T","--TargetsFile", help="Absolute filepath to list of targets to give addresses")
+@click.option("-T","--TargetsFile", help="Filepath to list of targets to give addresses",type=click.Path())
 @click.option("-fA", "--firstAddress", help="First avalible address",default="2001:db9::1")
 @click.option("-lA", "--lastAddress", help="Last avalible address",default="2001:db9::ffff:ffff:ffff:ffff")
 @click.option("-dns", help="Address of DNS server",default="2001:500::1035")
@@ -237,8 +235,8 @@ def dhcp(interface,targetsfile,firstaddress,lastaddress,dns):
 
 @click.command
 @click.option("-i","--interface", prompt="Ineterface for the network", help="Interface you want to connect to")
-@click.option("-T","--TargetsFile", prompt="Absolute filepath to the list of targets", help="Absolute filepath to list of targets to provide dns")
-@click.option("-dns","--DnsFile", prompt="Absolute filepath to dns file", help="Absolute filepath to a dns translation file")
+@click.option("-T","--TargetsFile", prompt="Filepath to the list of targets", help="Filepath to list of targets to provide dns",type=click.Path())
+@click.option("-dns","--DnsFile", prompt="Filepath to dns file", help="Filepath to a dns translation file",type=click.Path())
 @click.option("-joker", is_flag=True, help="Redirect all queries to the first address in DNS File")
 def dns(interface,targetsfile,dnsfile,joker):
     conf.iface = interface
