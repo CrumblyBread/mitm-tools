@@ -12,6 +12,8 @@ Mitm-tools are a set of tools made in Python centered around Man-in-the-middle a
 
 ## Usage
 
+Testing was only one on a Linux machine, for this reason it is recommended to not run on Windows, the script might not work properly if it works at all !!
+
 Mitm-tools are made in Python so you will need it to run them.<br>
 You can choose one of three modes of to use. The fake gateway mode, the fake DHCPv6 server and the fake DNS server.
 You can always use the <mark>--help</mark> option to get more information about what options the program needs.
