@@ -1,5 +1,6 @@
 import time
 import warnings
+import ipaddress
 
 from scapy.ansmachine import AnsweringMachine
 from scapy.arch import get_if_raw_hwaddr, in6_getifaddr

