@@ -136,7 +136,6 @@ class DNS_am(AnsweringMachine):
         )
 
     def make_reply(self, req):
-        print("1")
         mDNS = isinstance(self, mDNS_am)
         llmnr = self.cls != DNS
         # Build reply from the request
@@ -175,7 +174,6 @@ class DNS_am(AnsweringMachine):
         try:
             resp /= UDP(sport=req[UDP].dport, dport=req[UDP].sport)
         except IndexError:
-            print("3")
             warning("No UDP layer in %s", req.command(), exc_info=True)
             return
         # Now process each query and store its answer in 'ans'
@@ -189,7 +187,6 @@ class DNS_am(AnsweringMachine):
                 req.command(),
                 exc_info=True,
             )
-            print("4")
             return
         try:
             queries = req.qd
@@ -274,7 +271,6 @@ class DNS_am(AnsweringMachine):
         else:
             if not ans:
                 # No rq was actually answered, as none was valid. Discard.
-                print("5")
                 return
             # All rq were answered
             if mDNS:
@@ -282,12 +278,10 @@ class DNS_am(AnsweringMachine):
                 resp /= self.cls(id=req.id, qr=1, qd=[], an=ans)
             else:
                 resp /= self.cls(id=req.id, qr=1, qd=req.qd, an=ans)
-            print("6")
             return resp
         # An error happened
         if self.send_error:
             resp /= self.cls(id=req.id, qr=1, qd=req.qd, rcode=3)
-            print("7")
             return resp
 
 

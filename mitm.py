@@ -4,13 +4,10 @@ from scapy.all import *
 from scapy.all import IPv6,ICMPv6ND_NA,ICMPv6ND_RA,ICMPv6ND_NS,ICMPv6ND_Redirect,ICMPv6NDOptSrcLLAddr,UDP,DHCP6_Advertise,DHCPv6_am,Ether,ICMPv6NDOptRDNSS,RandMAC,DNS,DNSRR,DNSQR,LLMNRQuery,LLMNRResponse,PcapWriter
 from scapy.all import send,srp1,sniff,sendp,conf,get_if_hwaddr,read_routes6
 import os
-import subprocess
 import threading
 import regex
 import dhcpAM
 import ipaddress
-import random
-import socket
 import dnsAM as dpc
 from clases import Device,vPort
 
@@ -209,7 +206,7 @@ def processTargetsFile(targetsfile,interface):
         lines = [line.rstrip() for line in file]
         for l in lines:
             if matchIPv6(l) and regex.match("^fe80:.+",l):
-                dev = Device(l,get_target_global(l),get_target_mac(l,interface))
+                dev = Device(l,"",get_target_mac(l,interface))
                 targets.append(dev)
 
 def processDnsFile(dnsfile):
